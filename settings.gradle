@@ -6,5 +6,5 @@ dependencyResolutionManagement {
         jcenter()
 	}
 }
-rootProject.name = "GCamOffset"
+rootProject.name = "GCamPhotosPreview"
 include ':app'
