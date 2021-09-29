@@ -3,7 +3,7 @@
     xmlns:tools="http://schemas.android.com/tools"
     package="com.google.android.apps.photos">
 
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
 
     <application
         android:allowBackup="false"
@@ -28,7 +28,14 @@
                 <data android:mimeType="image/*" />
                 <data android:mimeType="application/vnd.google.panorama360+jpg" />
             </intent-filter>
+
+            <!-- Needed only so GCam can query for and find us -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
         </activity>
+
     </application>
 
 </manifest>

@@ -23,8 +23,10 @@ const val TAG = "FakePhotos"
 
 class MainActivity : FragmentActivity() {
 
-    private val requestPermissionLauncher = registerForActivityResult(RequestPermission()) {
-        if (!it) {
+    private val requestPermissionLauncher = registerForActivityResult(RequestPermission()) { ok ->
+        if (ok) {
+            intentHandler.handleIntent(intent, this::showUri)
+        } else {
             Toast.makeText(this, R.string.permission_denied, Toast.LENGTH_LONG).show()
         }
     }
@@ -47,24 +49,15 @@ class MainActivity : FragmentActivity() {
         }
 
         if (intent.`package` == packageName) {
-            intentHandler.handleIntent(intent, this::showUri)
+            if (checkSelfPermission(READ_EXTERNAL_STORAGE) == PERMISSION_GRANTED) {
+                intentHandler.handleIntent(intent, this::showUri)
+            } else {
+                requestPermissionLauncher.launch(READ_EXTERNAL_STORAGE)
+            }
         } else {
             @SuppressLint("SetTextI18n")
             textView.text = "Unknown intent:\n\n$intent"
             textView.visibility = VISIBLE
-
-            // TODO this allows the cam app to find us, but only via interaction, not via intent
-            if (System.currentTimeMillis() > 0) {
-                @Suppress("Deprecation")
-                startActivityForResult(intentHandler.getCamIntent(), 0)
-            }
-        }
-    }
-
-    override fun onStart() {
-        super.onStart()
-        if (checkSelfPermission(READ_EXTERNAL_STORAGE) != PERMISSION_GRANTED) {
-            requestPermissionLauncher.launch(READ_EXTERNAL_STORAGE)
         }
     }
 
