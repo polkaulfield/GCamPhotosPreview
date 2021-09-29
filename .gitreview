@@ -1,0 +1,5 @@
+[gerrit]
+host=review.calyxos.org
+port=29418
+project=CalyxOS/platform_external_calyx_GCamPhotosPreview
+defaultbranch=android11-qpr1
