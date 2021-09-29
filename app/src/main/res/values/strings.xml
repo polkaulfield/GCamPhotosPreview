@@ -1,3 +1,4 @@
 <resources>
-    <string name="app_name">Google Fake Photos</string>
+    <string name="app_name">GCamOffset</string>
+    <string name="permission_denied">The app won\'t work properly without this permission</string>
 </resources>

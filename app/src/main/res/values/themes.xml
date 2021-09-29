@@ -1,7 +1,7 @@
 <resources>
 
-    <style name="Theme.GoogleFakePhotos" parent="android:Theme.Material">
-
+    <style name="Theme.GoogleFakePhotos" parent="android:Theme.Material.NoActionBar.Fullscreen">
+        <item name="android:windowBackground">@android:color/transparent</item>
     </style>
 
 </resources>
