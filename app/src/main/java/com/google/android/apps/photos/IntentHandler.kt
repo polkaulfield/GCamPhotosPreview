@@ -17,20 +17,22 @@
 package com.google.android.apps.photos
 
 import android.app.PendingIntent
-import android.content.ContentResolver
 import android.content.ContentUris
 import android.content.Context
 import android.content.Intent
 import android.database.ContentObserver
+import android.database.Cursor
 import android.net.Uri
 import android.os.Handler
-import android.os.Looper
 import android.provider.MediaStore
 import android.provider.MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA
 import android.provider.MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA_SECURE
+import android.provider.MediaStore.MediaColumns.IS_PENDING
 import android.util.Log
-import android.view.View
-import android.widget.ProgressBar
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 
 private const val PACKAGE_GOOGLE_CAM = "com.google.android.GoogleCamera"
 private const val SECURE_MODE = "com.google.android.apps.photos.api.secure_mode"
@@ -39,62 +41,132 @@ private const val INTENT_CAM_SECURE = "CAMERA_RELAUNCH_SECURE_INTENT_EXTRA"
 private const val EXTRA_PROCESSING = "processing_uri_intent_extra"
 private const val EXTRA_SECURE_IDS = "com.google.android.apps.photos.api.secure_mode_ids"
 
-class IntentHandler(
-    private val contentResolver: ContentResolver,
-    private val mainLooper: Looper,
-    private val progressBar: ProgressBar,
-    private val setShowWhenLocked: () -> Unit,
-) {
+class IntentHandler(private val context: Context) {
 
-    fun handleIntent(intent: Intent, showUri: (Uri, List<Long>?) -> Unit) {
+    private val contentResolver = context.contentResolver
+    private val handler = Handler(context.mainLooper)
+
+    fun isSecure(intent: Intent) = intent.getBooleanExtra(SECURE_MODE, false)
+
+    fun handleIntent(intent: Intent): Flow<List<PagerItem>> = flow {
         if (BuildConfig.DEBUG) log(intent)
 
-        val isSecure = intent.getBooleanExtra(SECURE_MODE, false)
-        if (isSecure) setShowWhenLocked()
-
-        val secureIds = if (isSecure) {
-            (intent.extras?.getSerializable(EXTRA_SECURE_IDS) as LongArray).toList()
-        } else null
-
+        val isSecure = isSecure(intent)
         val uri = intent.data!!
+        // TODO see if we can get a processing preview somehow
         val processingUri = intent.getParcelableExtra<Uri>(EXTRA_PROCESSING)
-        if (processingUri == null) showUri(uri, secureIds)
-        else observeUri(uri, secureIds, showUri)
-    }
+        val uriIsReady = isUriReady(uri)
+        val items = ArrayList<PagerItem>().apply {
+            add(PagerItem.CamItem(pendingIntent = getCamPendingIntent(intent, isSecure)))
+            add(PagerItem.UriItem(getIdFromUri(uri), uri, uriIsReady))
+        }
+        emit(items)
 
-    private fun observeUri(uri: Uri, secureIds: List<Long>?, showUri: (Uri, List<Long>?) -> Unit) {
-        progressBar.visibility = View.VISIBLE
-        val handler = Handler(mainLooper)
-        val observer = object : ContentObserver(handler) {
-            override fun onChange(selfChange: Boolean) {
-                Log.e(TAG, "uri changed: (selfChange: $selfChange) $uri")
-                if (isUriReady(uri)) {
-                    showUri(uri, secureIds)
-                    contentResolver.unregisterContentObserver(this)
+        // create PagerItems for other Uris
+        val newItems = ArrayList(items)
+        val extraUris: List<Uri> = if (isSecure) {
+            val secureIds = (intent.extras?.getSerializable(EXTRA_SECURE_IDS) as LongArray).toList()
+            getUrisFromIds(secureIds)
+        } else whenReady(uri, uriIsReady) {
+            newItems.removeLast() // will be returned again in next call
+            // TODO emit update as soon as first URI is ready
+            getUris(uri)
+        }
+        var allReady = true
+        extraUris.forEach { nextUri ->
+            val item = PagerItem.UriItem(
+                id = getIdFromUri(nextUri),
+                uri = nextUri,
+                ready = isUriReady(nextUri),
+            )
+            newItems.add(item)
+            allReady = allReady && item.ready
+        }
+        emit(newItems)
+
+        // return early of all are ready
+        if (allReady) return@flow
+
+        // create final PagerItems (we could emit more frequently, but don't bother for now)
+        Log.d(TAG, "Creating final pager items")
+        val finalItems = ArrayList<PagerItem>(newItems.size)
+        newItems.forEach { item ->
+            when (item) {
+                is PagerItem.CamItem -> finalItems.add(item)
+                is PagerItem.UriItem -> {
+                    whenReady(item.uri, item.ready) {
+                        finalItems.add(item.copy(ready = true))
+                    }
                 }
             }
         }
-        contentResolver.registerContentObserver(uri, false, observer)
+        emit(finalItems)
+    }
+
+    private fun getCamPendingIntent(intent: Intent, isSecure: Boolean): PendingIntent {
+        val camIntentKey = if (isSecure) INTENT_CAM_SECURE else INTENT_CAM
+        return intent.getParcelableExtra(camIntentKey) ?: PendingIntent.getActivity(
+            context, 0, getCamIntent(isSecure), PendingIntent.FLAG_IMMUTABLE
+        )
+    }
+
+    private fun getCamIntent(isSecure: Boolean = false) = Intent(
+        if (isSecure) INTENT_ACTION_STILL_IMAGE_CAMERA_SECURE
+        else INTENT_ACTION_STILL_IMAGE_CAMERA
+    ).apply {
+        `package` = PACKAGE_GOOGLE_CAM
+    }
+
+    private fun getIdFromUri(uri: Uri): Long {
+        return uri.lastPathSegment?.toLong() ?: error("Can't get ID from $uri")
     }
 
     private fun isUriReady(uri: Uri): Boolean {
-        return contentResolver.query(
-            uri,
-            arrayOf(MediaStore.MediaColumns.IS_PENDING),
-            null,
-            null,
-            null
-        )?.use { c ->
-            while (c.moveToNext()) {
-                return@use (c.getInt(0) == 0).apply {
-                    Log.e(TAG, "is ready: $this")
-                }
-            }
-            return@use false
+        return getReadyCursor(uri)?.use { c ->
+            isCursorReady(c)
         } ?: return false
     }
 
-    fun getUris(uri: Uri): List<Uri> {
+    private fun isCursorReady(c: Cursor): Boolean {
+        c.moveToNext()
+        return c.getInt(0) == 0
+    }
+
+    private fun getReadyCursor(uri: Uri): Cursor? {
+        return contentResolver.query(uri, arrayOf(IS_PENDING), null, null, null)
+    }
+
+    private suspend fun <T> whenReady(uri: Uri, isReady: Boolean, block: () -> T): T {
+        if (!isReady) waitForUriToBecomeReady(uri)
+        return block()
+    }
+
+    private suspend fun waitForUriToBecomeReady(uri: Uri) =
+        suspendCancellableCoroutine<Unit> { continuation ->
+            Log.e(TAG, "waitForUriToBecomeReady $uri")
+            val cursor = getReadyCursor(uri) ?: error("ready cursor null for $uri")
+            if (isCursorReady(cursor)) {
+                Log.d(TAG, "cursor was ready early for $uri")
+                continuation.resume(Unit)
+                return@suspendCancellableCoroutine
+            }
+            val observer = object : ContentObserver(handler) {
+                override fun onChange(selfChange: Boolean) {
+                    Log.e(TAG, "uri changed while waiting: $uri")
+                    if (isUriReady(uri)) {
+                        // need to check if still active, because fires several times
+                        if (continuation.isActive) {
+                            cursor.unregisterContentObserver(this)
+                            continuation.resume(Unit)
+                        }
+                    }
+                }
+            }
+            cursor.registerContentObserver(observer)
+            continuation.invokeOnCancellation { cursor.unregisterContentObserver(observer) }
+        }
+
+    private fun getUris(uri: Uri): List<Uri> {
         val bucketIdProjection = arrayOf(MediaStore.MediaColumns.BUCKET_ID)
         val bucketId = contentResolver.query(uri, bucketIdProjection, null, null, null)?.use { c ->
             while (c.moveToNext()) {
@@ -122,22 +194,8 @@ class IntentHandler(
         return getUrisFromIds(ids)
     }
 
-    fun getUrisFromIds(ids: List<Long>): List<Uri> = ids.map {
+    private fun getUrisFromIds(ids: List<Long>): List<Uri> = ids.map {
         ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, it)
-    }
-
-    fun getCamPendingIntent(context: Context, intent: Intent, isSecure: Boolean): PendingIntent {
-        val camIntentKey = if (isSecure) INTENT_CAM_SECURE else INTENT_CAM
-        return intent.getParcelableExtra(camIntentKey) ?: PendingIntent.getActivity(
-            context, 0, getCamIntent(isSecure), PendingIntent.FLAG_IMMUTABLE
-        )
-    }
-
-    fun getCamIntent(isSecure: Boolean = false) = Intent(
-        if (isSecure) INTENT_ACTION_STILL_IMAGE_CAMERA_SECURE
-        else INTENT_ACTION_STILL_IMAGE_CAMERA
-    ).apply {
-        `package` = PACKAGE_GOOGLE_CAM
     }
 
     private fun log(intent: Intent?) {

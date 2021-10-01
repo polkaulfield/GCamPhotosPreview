@@ -16,73 +16,65 @@
 
 package com.google.android.apps.photos
 
-import android.net.Uri
 import android.os.Bundle
 import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
+import android.view.View.INVISIBLE
+import android.view.View.VISIBLE
 import android.view.ViewGroup
-import androidx.exifinterface.media.ExifInterface
-import androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION
+import android.widget.ProgressBar
 import androidx.fragment.app.Fragment
+import androidx.fragment.app.activityViewModels
 import com.davemorrissey.labs.subscaleview.ImageSource
 import com.davemorrissey.labs.subscaleview.SubsamplingScaleImageView
-import java.io.InputStream
+import com.davemorrissey.labs.subscaleview.SubsamplingScaleImageView.ORIENTATION_USE_EXIF
 
 class ImageFragment : Fragment() {
 
     companion object {
-        fun newInstance(uri: Uri) = ImageFragment().apply {
+        fun newInstance(index: Int) = ImageFragment().apply {
             arguments = Bundle().apply {
-                putParcelable("uri", uri)
+                putInt("index", index)
             }
         }
     }
 
+    private val viewModel: MainViewModel by activityViewModels()
+
     private lateinit var imageView: SubsamplingScaleImageView
+    private lateinit var progressBar: ProgressBar
+
+    private var currentItem: PagerItem.UriItem? = null
 
     override fun onCreateView(
         inflater: LayoutInflater,
         container: ViewGroup?,
-        savedInstanceState: Bundle?
+        savedInstanceState: Bundle?,
     ): View = inflater.inflate(R.layout.fragment_image, container, false).apply {
-        val uri: Uri = requireArguments().getParcelable("uri")!!
+        val index = requireArguments().getInt("index")
         imageView = findViewById(R.id.imageView)
+        progressBar = findViewById(R.id.progressBar)
 
-        try {
-            imageView.setImage(uri)
-        } catch (e: Exception) {
-            Log.e(TAG, "Error getting EXIF orientation", e)
-        }
+        // our fragments don't get recreated for changes, so listen to changes here
+        viewModel.items.observe(viewLifecycleOwner, { items ->
+            setItem(items[index] as PagerItem.UriItem)
+        })
     }
 
-    private fun SubsamplingScaleImageView.setImage(uri: Uri) {
-        requireContext().contentResolver.openInputStream(uri).use {
-            setExifOrientation(it!!)
-        }
-        setImage(ImageSource.uri(uri))
-    }
-
-    private fun SubsamplingScaleImageView.setExifOrientation(inputStream: InputStream) {
-        val exifOrientation = ExifInterface(inputStream).getAttributeInt(TAG_ORIENTATION, 1)
-        orientation = when (exifOrientation) {
-            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> {
-                scaleX = -1f
-                SubsamplingScaleImageView.ORIENTATION_0
+    private fun setItem(item: PagerItem.UriItem) {
+        if (currentItem == item) return
+        currentItem = item
+        if (item.ready) {
+            progressBar.visibility = INVISIBLE
+            try {
+                imageView.setImage(ImageSource.uri(item.uri))
+                imageView.orientation = ORIENTATION_USE_EXIF
+            } catch (e: Exception) {
+                Log.e(TAG, "Error getting EXIF orientation", e)
             }
-            ExifInterface.ORIENTATION_FLIP_VERTICAL -> {
-                scaleY = -1f
-                SubsamplingScaleImageView.ORIENTATION_0
-            }
-            ExifInterface.ORIENTATION_TRANSVERSE -> {
-                scaleX = -1f
-                SubsamplingScaleImageView.ORIENTATION_270
-            }
-            ExifInterface.ORIENTATION_TRANSPOSE -> {
-                scaleX = -1f
-                SubsamplingScaleImageView.ORIENTATION_90
-            }
-            else -> SubsamplingScaleImageView.ORIENTATION_USE_EXIF
+        } else {
+            progressBar.visibility = VISIBLE
         }
     }
 
