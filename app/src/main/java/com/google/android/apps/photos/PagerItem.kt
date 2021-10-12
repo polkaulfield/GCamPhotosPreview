@@ -18,7 +18,6 @@ package com.google.android.apps.photos
 
 import android.app.PendingIntent
 import android.net.Uri
-import android.util.Log
 import androidx.recyclerview.widget.DiffUtil
 
 sealed class PagerItem(open val id: Long) {
@@ -38,9 +37,7 @@ class PagerItemCallback : DiffUtil.ItemCallback<PagerItem>() {
     override fun areContentsTheSame(oldItem: PagerItem, newItem: PagerItem): Boolean {
         return when {
             (newItem is PagerItem.UriItem && oldItem is PagerItem.UriItem) -> {
-                (newItem.ready == oldItem.ready).apply {
-                    Log.e(TAG, "${newItem.uri} ${newItem.ready} ${oldItem.ready}")
-                }
+                newItem.ready == oldItem.ready
             }
             else -> oldItem.id == newItem.id
         }

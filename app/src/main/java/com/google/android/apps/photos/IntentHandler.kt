@@ -17,17 +17,21 @@
 package com.google.android.apps.photos
 
 import android.app.PendingIntent
+import android.content.ContentResolver.*
 import android.content.ContentUris
 import android.content.Context
 import android.content.Intent
 import android.database.ContentObserver
 import android.database.Cursor
 import android.net.Uri
+import android.os.Bundle
 import android.os.Handler
 import android.provider.MediaStore
 import android.provider.MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA
 import android.provider.MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA_SECURE
+import android.provider.MediaStore.MediaColumns
 import android.provider.MediaStore.MediaColumns.IS_PENDING
+import android.provider.MediaStore.QUERY_ARG_MATCH_PENDING
 import android.util.Log
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -64,47 +68,52 @@ class IntentHandler(private val context: Context) {
 
         // create PagerItems for other Uris
         val newItems = ArrayList(items)
-        val extraUris: List<Uri> = if (isSecure) {
+        val extraItems: List<PagerItem.UriItem> = if (isSecure) {
             val secureIds = (intent.extras?.getSerializable(EXTRA_SECURE_IDS) as LongArray).toList()
             Log.d(TAG, "secureIds: $secureIds")
-            getUrisFromIds(secureIds)
-        } else whenReady(uri, uriIsReady) {
-            newItems.removeLast() // will be returned again in next call
-            // TODO emit update as soon as first URI is ready
-            getUris(uri)
+            // FIXME this doesn't work for videos
+            getUrisFromIds(secureIds).map { nextUri ->
+                val id = getIdFromUri(nextUri)
+                PagerItem.UriItem(
+                    id = id,
+                    uri = nextUri,
+                    ready = isUriReady(nextUri),
+                )
+            }
+        } else {
+            getUriItemsFromFirstUri(uri)
         }
-        var allReady = true
-        extraUris.forEach { nextUri ->
-            val id = getIdFromUri(nextUri)
-            // Google Cam 7.x lists the first photo in secureIds, so don't re-add it
-            if (id == items[1].id) return@forEach
-            val item = PagerItem.UriItem(
-                id = id,
-                uri = nextUri,
-                ready = isUriReady(nextUri),
-            )
-            newItems.add(item)
-            allReady = allReady && item.ready
+
+        if (extraItems.isNotEmpty() && extraItems[0].id == items[1].id) {
+            // The extra items include the first UriItem as well, so remove it from newItems first
+            newItems.removeLast()
         }
+        newItems.addAll(extraItems)
         emit(newItems)
 
-        // return early of all are ready
+        // return early if all are ready
+        val allReady = !newItems.any { it is PagerItem.UriItem && !it.ready }
         if (allReady) return@flow
 
-        // create final PagerItems (we could emit more frequently, but don't bother for now)
-        Log.d(TAG, "Creating final pager items")
-        val finalItems = ArrayList<PagerItem>(newItems.size)
-        newItems.forEach { item ->
+        // create final PagerItems
+        Log.d(TAG, "Emitting final pager items")
+        val finalItems = ArrayList<PagerItem>(newItems)
+        // start waiting for items to become ready from the end
+        newItems.reversed().forEachIndexed { index, item ->
             when (item) {
-                is PagerItem.CamItem -> finalItems.add(item)
-                is PagerItem.UriItem -> {
+                is PagerItem.CamItem -> { // no-op
+                }
+                is PagerItem.UriItem -> if (!item.ready) {
+                    // only wait-for and update items that aren't ready
                     whenReady(item.uri, item.ready) {
-                        finalItems.add(item.copy(ready = true))
+                        Log.i(TAG, "Item with id ${item.id} became ready")
+                        val i = finalItems.size - 1 - index // account for reversed list
+                        finalItems[i] = item.copy(ready = true)
+                        emit(ArrayList(finalItems))
                     }
                 }
             }
         }
-        emit(finalItems)
     }
 
     private fun getCamPendingIntent(intent: Intent, isSecure: Boolean): PendingIntent {
@@ -140,7 +149,7 @@ class IntentHandler(private val context: Context) {
         return contentResolver.query(uri, arrayOf(IS_PENDING), null, null, null)
     }
 
-    private suspend fun <T> whenReady(uri: Uri, isReady: Boolean, block: () -> T): T {
+    private suspend fun <T> whenReady(uri: Uri, isReady: Boolean, block: suspend () -> T): T {
         if (!isReady) waitForUriToBecomeReady(uri)
         return block()
     }
@@ -170,36 +179,49 @@ class IntentHandler(private val context: Context) {
             continuation.invokeOnCancellation { cursor.unregisterContentObserver(observer) }
         }
 
-    private fun getUris(uri: Uri): List<Uri> {
-        val bucketIdProjection = arrayOf(MediaStore.MediaColumns.BUCKET_ID)
+    private fun getUriItemsFromFirstUri(uri: Uri): List<PagerItem.UriItem> {
+        val bucketIdProjection = arrayOf(MediaColumns.BUCKET_ID)
         val bucketId = contentResolver.query(uri, bucketIdProjection, null, null, null)?.use { c ->
             while (c.moveToNext()) {
-                Log.e(TAG, "bucketId: ${c.getInt(0)}")
+                Log.d(TAG, "bucketId: ${c.getInt(0)}")
                 return@use c.getInt(0)
             }
             return@use null
-        } ?: return listOf(uri)
-        val ids = ArrayList<Long>()
+        } ?: return listOf(PagerItem.UriItem(getIdFromUri(uri), uri, isUriReady(uri)))
+        val items = ArrayList<PagerItem.UriItem>()
+        val queryArgs = Bundle().apply {
+            putInt(QUERY_ARG_LIMIT, 42)
+            putInt(QUERY_ARG_MATCH_PENDING, 1)
+            putString(QUERY_ARG_SQL_SELECTION, "${MediaColumns.BUCKET_ID} = ?")
+            putStringArray(QUERY_ARG_SQL_SELECTION_ARGS, arrayOf(bucketId.toString()))
+            putStringArray(QUERY_ARG_SORT_COLUMNS, arrayOf(MediaColumns._ID))
+            putInt(QUERY_ARG_SORT_DIRECTION, QUERY_SORT_DIRECTION_DESCENDING)
+        }
         contentResolver.query(
             MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-            arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.MIME_TYPE),
-            "${MediaStore.MediaColumns.BUCKET_ID} = ?",
-            arrayOf(bucketId.toString()),
-            "${MediaStore.MediaColumns._ID} DESC"
+            arrayOf(MediaColumns._ID, IS_PENDING, MediaColumns.MIME_TYPE),
+            queryArgs,
+            null,
         )?.use { c ->
             while (c.moveToNext()) {
-                ids.add(c.getLong(0))
+                val id = c.getLong(0)
+                val ready = c.getInt(1) == 0
+                items.add(PagerItem.UriItem(id, getUriFromId(id), ready))
             }
         }
-        if (ids.isEmpty()) {
+        if (items.isEmpty()) {
             Log.e(TAG, "Warning query returned no results")
-            return listOf(uri)
+            return listOf(PagerItem.UriItem(getIdFromUri(uri), uri, isUriReady(uri)))
         }
-        return getUrisFromIds(ids)
+        return items
+    }
+
+    private fun getUriFromId(id: Long): Uri {
+        return ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id)
     }
 
     private fun getUrisFromIds(ids: List<Long>): List<Uri> = ids.map {
-        ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, it)
+        getUriFromId(it)
     }
 
     private fun log(intent: Intent?) {
