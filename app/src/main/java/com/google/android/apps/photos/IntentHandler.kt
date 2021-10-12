@@ -66,6 +66,7 @@ class IntentHandler(private val context: Context) {
         val newItems = ArrayList(items)
         val extraUris: List<Uri> = if (isSecure) {
             val secureIds = (intent.extras?.getSerializable(EXTRA_SECURE_IDS) as LongArray).toList()
+            Log.d(TAG, "secureIds: $secureIds")
             getUrisFromIds(secureIds)
         } else whenReady(uri, uriIsReady) {
             newItems.removeLast() // will be returned again in next call
@@ -74,8 +75,11 @@ class IntentHandler(private val context: Context) {
         }
         var allReady = true
         extraUris.forEach { nextUri ->
+            val id = getIdFromUri(nextUri)
+            // Google Cam 7.x lists the first photo in secureIds, so don't re-add it
+            if (id == items[1].id) return@forEach
             val item = PagerItem.UriItem(
-                id = getIdFromUri(nextUri),
+                id = id,
                 uri = nextUri,
                 ready = isUriReady(nextUri),
             )
