@@ -18,7 +18,12 @@ package com.google.android.apps.photos
 
 import android.Manifest.permission.READ_EXTERNAL_STORAGE
 import android.annotation.SuppressLint
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.Intent.ACTION_SCREEN_OFF
+import android.content.Intent.ACTION_USER_PRESENT
+import android.content.IntentFilter
 import android.content.pm.PackageManager.PERMISSION_GRANTED
 import android.os.Bundle
 import android.util.Log
@@ -74,7 +79,7 @@ class MainActivity : FragmentActivity() {
 
         // handle intent
         if (intent.`package` == packageName && intent.action?.contains("REVIEW") == true) {
-            if (viewModel.isSecure(intent)) setShowWhenLocked(true)
+            if (viewModel.isSecure(intent)) onLaunchedWhileLocked()
 
             if (checkSelfPermission(READ_EXTERNAL_STORAGE) == PERMISSION_GRANTED) {
                 viewModel.onNewIntent(intent)
@@ -91,6 +96,34 @@ class MainActivity : FragmentActivity() {
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
         Log.e(TAG, "onNewIntent: $intent")
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        if (viewModel.isSecure(intent)) unregisterReceiver(shutdownReceiver)
+    }
+
+    /**
+     * Close activity when secure app passes lock screen or screen turns off.
+     */
+    private val shutdownReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            Log.d(TAG, "shutdownReceiver: finish()")
+            finish()
+        }
+    }
+
+    private fun onLaunchedWhileLocked() {
+        setShowWhenLocked(true)
+
+        // Filter for screen off so that we can finish activity when screen is off.
+        registerReceiver(shutdownReceiver, IntentFilter(ACTION_SCREEN_OFF))
+
+        // Filter for phone unlock so that we can finish activity via this UI path:
+        //    1. from secure lock screen, user starts photo preview
+        //    2. user presses home button
+        //    3. user unlocks phone
+        registerReceiver(shutdownReceiver, IntentFilter(ACTION_USER_PRESENT))
     }
 
     private inner class ViewPagerAdapter(fa: FragmentActivity) : FragmentStateAdapter(fa) {
