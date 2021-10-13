@@ -22,7 +22,6 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.Intent.ACTION_SCREEN_OFF
-import android.content.Intent.ACTION_USER_PRESENT
 import android.content.IntentFilter
 import android.content.pm.PackageManager.PERMISSION_GRANTED
 import android.os.Bundle
@@ -118,12 +117,6 @@ class MainActivity : FragmentActivity() {
 
         // Filter for screen off so that we can finish activity when screen is off.
         registerReceiver(shutdownReceiver, IntentFilter(ACTION_SCREEN_OFF))
-
-        // Filter for phone unlock so that we can finish activity via this UI path:
-        //    1. from secure lock screen, user starts photo preview
-        //    2. user presses home button
-        //    3. user unlocks phone
-        registerReceiver(shutdownReceiver, IntentFilter(ACTION_USER_PRESENT))
     }
 
     private inner class ViewPagerAdapter(fa: FragmentActivity) : FragmentStateAdapter(fa) {
@@ -149,7 +142,7 @@ class MainActivity : FragmentActivity() {
             val item = differ.currentList[position]
             Log.d(TAG, "createFragment $position $item")
             return if (item is PagerItem.CamItem) CamFragment.newInstance(item.pendingIntent)
-            else ImageFragment.newInstance(position)
+            else ImageFragment.newInstance(item.id)
         }
     }
 

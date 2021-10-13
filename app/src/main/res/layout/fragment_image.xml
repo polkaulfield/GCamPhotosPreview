@@ -22,8 +22,7 @@
     <com.davemorrissey.labs.subscaleview.SubsamplingScaleImageView
         android:id="@+id/imageView"
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:layout_marginBottom="32dp" />
+        android:layout_height="match_parent" />
 
     <ProgressBar
         android:id="@+id/progressBar"
@@ -33,5 +32,30 @@
         android:layout_gravity="center"
         android:visibility="invisible"
         tools:visibility="visible" />
+
+    <LinearLayout
+        android:id="@+id/actionBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:paddingHorizontal="8dp"
+        android:visibility="invisible"
+        tools:visibility="visible">
+
+        <View
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:layout_weight="1" />
+
+        <ImageButton
+            android:id="@+id/deleteButton"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/delete"
+            android:scaleType="center"
+            android:src="@drawable/ic_delete" />
+
+    </LinearLayout>
 
 </FrameLayout>

@@ -18,6 +18,7 @@ package com.google.android.apps.photos
 
 import android.app.Application
 import android.content.Intent
+import androidx.annotation.UiThread
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
@@ -25,6 +26,7 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import java.util.concurrent.ConcurrentSkipListSet
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -33,12 +35,26 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _items = MutableLiveData<List<PagerItem>>()
     val items: LiveData<List<PagerItem>> = _items
 
+    private val deletedIds = ConcurrentSkipListSet<Long>()
+
     fun isSecure(intent: Intent) = intentHandler.isSecure(intent)
 
     fun onNewIntent(intent: Intent) {
         viewModelScope.launch(Dispatchers.IO) {
-            intentHandler.handleIntent(intent).collect { _items.postValue(it) }
+            intentHandler.handleIntent(intent).collect { newItems ->
+                _items.postValue(newItems.filter {
+                    val isDeleted = deletedIds.contains(it.id)
+                    !isDeleted
+                })
+            }
         }
+    }
+
+    @UiThread
+    fun onItemDeleted(item: PagerItem.UriItem) {
+        deletedIds.add(item.id)
+        val oldItems = items.value!!
+        _items.value = oldItems.filter { it.id != item.id }
     }
 
 }
