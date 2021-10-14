@@ -45,6 +45,7 @@ class MainActivity : FragmentActivity() {
 
     private lateinit var viewPager: ViewPager2
     private lateinit var textView: TextView
+    private var shutdownReceiverRegistered = false
 
     private val requestPermissionLauncher = registerForActivityResult(RequestPermission()) { ok ->
         if (ok) {
@@ -99,7 +100,7 @@ class MainActivity : FragmentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        if (viewModel.isSecure(intent)) unregisterReceiver(shutdownReceiver)
+        if (shutdownReceiverRegistered) unregisterReceiver(shutdownReceiver)
     }
 
     /**
@@ -117,6 +118,7 @@ class MainActivity : FragmentActivity() {
 
         // Filter for screen off so that we can finish activity when screen is off.
         registerReceiver(shutdownReceiver, IntentFilter(ACTION_SCREEN_OFF))
+        shutdownReceiverRegistered = true
     }
 
     private inner class ViewPagerAdapter(fa: FragmentActivity) : FragmentStateAdapter(fa) {
