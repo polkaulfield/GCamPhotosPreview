@@ -25,6 +25,7 @@ sealed class PagerItem(open val id: Long) {
     data class UriItem(
         override val id: Long,
         val uri: Uri,
+        val mimeType: String?,
         val ready: Boolean,
     ) : PagerItem(id)
 }

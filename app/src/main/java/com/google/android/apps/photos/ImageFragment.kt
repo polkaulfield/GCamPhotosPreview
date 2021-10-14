@@ -19,18 +19,25 @@ package com.google.android.apps.photos
 import android.app.Activity.RESULT_OK
 import android.app.KeyguardManager
 import android.app.KeyguardManager.KeyguardDismissCallback
+import android.content.ActivityNotFoundException
 import android.content.Context
+import android.content.Intent
+import android.content.Intent.ACTION_EDIT
 import android.net.Uri
 import android.os.Bundle
 import android.provider.MediaStore
+import android.transition.TransitionManager
 import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
+import android.view.View.GONE
 import android.view.View.INVISIBLE
 import android.view.View.VISIBLE
 import android.view.ViewGroup
 import android.widget.ImageButton
 import android.widget.ProgressBar
+import android.widget.Toast
+import android.widget.Toast.LENGTH_LONG
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts.StartIntentSenderForResult
 import androidx.core.content.ContextCompat.getSystemService
@@ -55,6 +62,8 @@ class ImageFragment : Fragment() {
     private lateinit var imageView: SubsamplingScaleImageView
     private lateinit var progressBar: ProgressBar
     private lateinit var actionBar: ViewGroup
+    private lateinit var editButton: ImageButton
+    private lateinit var shareButton: ImageButton
     private lateinit var deleteButton: ImageButton
 
     private var currentItem: PagerItem.UriItem? = null
@@ -72,6 +81,8 @@ class ImageFragment : Fragment() {
         imageView = findViewById(R.id.imageView)
         progressBar = findViewById(R.id.progressBar)
         actionBar = findViewById(R.id.actionBar)
+        editButton = findViewById(R.id.editButton)
+        shareButton = findViewById(R.id.shareButton)
         deleteButton = findViewById(R.id.deleteButton)
 
         // our fragments don't get recreated for changes, so listen to changes here
@@ -86,23 +97,66 @@ class ImageFragment : Fragment() {
         currentItem = item
         if (item.ready) {
             progressBar.visibility = INVISIBLE
-            actionBar.visibility = VISIBLE
             try {
                 imageView.orientation = ORIENTATION_USE_EXIF
                 imageView.setImage(ImageSource.uri(item.uri))
             } catch (e: Exception) {
                 Log.e(TAG, "Error setting image", e)
             }
+            imageView.setOnClickListener {
+                viewModel.toggleBottomBar()
+            }
+            viewModel.showBottomBar.observe(viewLifecycleOwner, { show ->
+                TransitionManager.beginDelayedTransition(view as ViewGroup)
+                actionBar.visibility = if (show) VISIBLE else GONE
+            })
         } else {
             progressBar.visibility = VISIBLE
-            actionBar.visibility = INVISIBLE
+            actionBar.visibility = GONE
         }
-        deleteButton.setOnClickListener {
-            onDeleteButtonClicked(item)
+        editButton.setOnClickListener { onEditButtonClicked(item) }
+        shareButton.setOnClickListener { onShareButtonClicked(item) }
+        deleteButton.setOnClickListener { onDeleteButtonClicked(item) }
+    }
+
+    private fun onEditButtonClicked(item: PagerItem.UriItem) = doOrUnlockFirst {
+        val intent = Intent(ACTION_EDIT).apply {
+            setDataAndType(item.uri, item.mimeType)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        if (item.mimeType?.startsWith("video") == true) {
+            try {
+                startActivity(intent)
+            } catch (e: ActivityNotFoundException) {
+                intent.action = "com.android.camera.action.TRIM"
+                startActivityOrToast(intent)
+            }
+        } else {
+            startActivityOrToast(intent)
         }
     }
 
-    private fun onDeleteButtonClicked(item: PagerItem.UriItem) {
+    private fun onShareButtonClicked(item: PagerItem.UriItem) = doOrUnlockFirst {
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = item.mimeType
+            putExtra(Intent.EXTRA_STREAM, item.uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        startActivityOrToast(Intent.createChooser(intent, null))
+    }
+
+    private fun onDeleteButtonClicked(item: PagerItem.UriItem) = doOrUnlockFirst {
+        requestDeletion(requireContext(), item.uri)
+    }
+
+    private fun requestDeletion(context: Context, uri: Uri) {
+        val contentResolver = context.contentResolver
+        val intent = MediaStore.createDeleteRequest(contentResolver, listOf(uri))
+        val request = IntentSenderRequest.Builder(intent).build()
+        deletionLauncher.launch(request)
+    }
+
+    private fun doOrUnlockFirst(block: () -> Unit) {
         val context = requireActivity()
         val km = getSystemService(context, KeyguardManager::class.java)!!
         if (km.isDeviceLocked) {
@@ -112,19 +166,20 @@ class ImageFragment : Fragment() {
             // Here we just ask for unlocking instead for now.
             km.requestDismissKeyguard(context, object : KeyguardDismissCallback() {
                 override fun onDismissSucceeded() {
-                    requestDeletion(context, item.uri)
+                    block()
                 }
             })
         } else {
-            requestDeletion(context, item.uri)
+            block()
         }
     }
 
-    private fun requestDeletion(context: Context, uri: Uri) {
-        val contentResolver = context.contentResolver
-        val intent = MediaStore.createDeleteRequest(contentResolver, listOf(uri))
-        val request = IntentSenderRequest.Builder(intent).build()
-        deletionLauncher.launch(request)
+    private fun startActivityOrToast(intent: Intent) {
+        try {
+            startActivity(intent)
+        } catch (e: ActivityNotFoundException) {
+            Toast.makeText(requireContext(), R.string.activity_not_found, LENGTH_LONG).show()
+        }
     }
 
 }

@@ -34,6 +34,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _items = MutableLiveData<List<PagerItem>>()
     val items: LiveData<List<PagerItem>> = _items
+    private val _showBottomBar = MutableLiveData(false)
+    val showBottomBar: LiveData<Boolean> = _showBottomBar
 
     private val deletedIds = ConcurrentSkipListSet<Long>()
 
@@ -48,6 +50,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 })
             }
         }
+    }
+
+    @UiThread
+    fun toggleBottomBar() {
+        _showBottomBar.value = !_showBottomBar.value!!
     }
 
     @UiThread
