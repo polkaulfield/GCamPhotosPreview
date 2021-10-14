@@ -28,6 +28,7 @@ import android.os.Bundle
 import android.provider.MediaStore
 import android.transition.TransitionManager
 import android.util.Log
+import android.util.Size
 import android.view.LayoutInflater
 import android.view.View
 import android.view.View.GONE
@@ -35,6 +36,7 @@ import android.view.View.INVISIBLE
 import android.view.View.VISIBLE
 import android.view.ViewGroup
 import android.widget.ImageButton
+import android.widget.ImageView
 import android.widget.ProgressBar
 import android.widget.Toast
 import android.widget.Toast.LENGTH_LONG
@@ -43,9 +45,13 @@ import androidx.activity.result.contract.ActivityResultContracts.StartIntentSend
 import androidx.core.content.ContextCompat.getSystemService
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
+import androidx.lifecycle.lifecycleScope
 import com.davemorrissey.labs.subscaleview.ImageSource
 import com.davemorrissey.labs.subscaleview.SubsamplingScaleImageView
 import com.davemorrissey.labs.subscaleview.SubsamplingScaleImageView.ORIENTATION_USE_EXIF
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+
 
 class ImageFragment : Fragment() {
 
@@ -61,6 +67,7 @@ class ImageFragment : Fragment() {
 
     private lateinit var imageView: SubsamplingScaleImageView
     private lateinit var progressBar: ProgressBar
+    private lateinit var playButton: ImageView
     private lateinit var actionBar: ViewGroup
     private lateinit var editButton: ImageButton
     private lateinit var shareButton: ImageButton
@@ -80,6 +87,7 @@ class ImageFragment : Fragment() {
         val id = requireArguments().getLong("id")
         imageView = findViewById(R.id.imageView)
         progressBar = findViewById(R.id.progressBar)
+        playButton = findViewById(R.id.playButton)
         actionBar = findViewById(R.id.actionBar)
         editButton = findViewById(R.id.editButton)
         shareButton = findViewById(R.id.shareButton)
@@ -97,11 +105,15 @@ class ImageFragment : Fragment() {
         currentItem = item
         if (item.ready) {
             progressBar.visibility = INVISIBLE
-            try {
-                imageView.orientation = ORIENTATION_USE_EXIF
-                imageView.setImage(ImageSource.uri(item.uri))
-            } catch (e: Exception) {
-                Log.e(TAG, "Error setting image", e)
+            if (item.mimeType?.startsWith("video") == true) {
+                setVideo(item)
+            } else {
+                try {
+                    imageView.orientation = ORIENTATION_USE_EXIF
+                    imageView.setImage(ImageSource.uri(item.uri))
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error setting image", e)
+                }
             }
             imageView.setOnClickListener {
                 viewModel.toggleBottomBar()
@@ -117,6 +129,31 @@ class ImageFragment : Fragment() {
         editButton.setOnClickListener { onEditButtonClicked(item) }
         shareButton.setOnClickListener { onShareButtonClicked(item) }
         deleteButton.setOnClickListener { onDeleteButtonClicked(item) }
+    }
+
+    private fun setVideo(item: PagerItem.UriItem) {
+        playButton.visibility = VISIBLE
+        playButton.setOnClickListener {
+            doOrUnlockFirst {
+                val intent = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(item.uri, item.mimeType)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                startActivityOrToast(Intent.createChooser(intent, null))
+            }
+        }
+        val contentResolver = requireContext().contentResolver
+        val metrics = requireActivity().windowManager.currentWindowMetrics
+        val size = Size(metrics.bounds.width(), metrics.bounds.height())
+        lifecycleScope.launchWhenStarted {
+            withContext(Dispatchers.IO) {
+                @Suppress("BlockingMethodInNonBlockingContext")
+                val b = contentResolver.loadThumbnail(item.uri, size, null)
+                withContext(Dispatchers.Main) {
+                    imageView.setImage(ImageSource.bitmap(b))
+                }
+            }
+        }
     }
 
     private fun onEditButtonClicked(item: PagerItem.UriItem) = doOrUnlockFirst {
