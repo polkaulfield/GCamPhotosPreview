@@ -84,7 +84,10 @@ class IntentHandler(private val context: Context) {
             when (item) {
                 is PagerItem.CamItem -> { // no-op
                 }
-                is PagerItem.UriItem -> if (!item.ready) {
+                // FIXME It can happen that an old photo never becomes ready,
+                //  Then the code below hangs forever, never loading most recent photos.
+                //  Hack: Therefore, we only wait for the last 10 photos
+                is PagerItem.UriItem -> if (!item.ready && item.id + 10 >= items[1].id) {
                     // only wait-for and update items that aren't ready
                     mediaManager.whenReady(item.uri, item.ready) {
                         Log.i(TAG, "Item with id ${item.id} became ready")
