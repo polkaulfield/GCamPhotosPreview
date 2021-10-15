@@ -23,6 +23,10 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.content.Intent.ACTION_EDIT
+import android.content.Intent.ACTION_SEND
+import android.content.Intent.ACTION_VIEW
+import android.content.Intent.EXTRA_STREAM
+import android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
 import android.net.Uri
 import android.os.Bundle
 import android.provider.MediaStore
@@ -51,7 +55,6 @@ import com.davemorrissey.labs.subscaleview.SubsamplingScaleImageView
 import com.davemorrissey.labs.subscaleview.SubsamplingScaleImageView.ORIENTATION_USE_EXIF
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-
 
 class ImageFragment : Fragment() {
 
@@ -135,9 +138,9 @@ class ImageFragment : Fragment() {
         playButton.visibility = VISIBLE
         playButton.setOnClickListener {
             doOrUnlockFirst {
-                val intent = Intent(Intent.ACTION_VIEW).apply {
+                val intent = Intent(ACTION_VIEW).apply {
                     setDataAndType(item.uri, item.mimeType)
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    addFlags(FLAG_GRANT_READ_URI_PERMISSION)
                 }
                 startActivityOrToast(intent)
             }
@@ -159,7 +162,7 @@ class ImageFragment : Fragment() {
     private fun onEditButtonClicked(item: PagerItem.UriItem) = doOrUnlockFirst {
         val intent = Intent(ACTION_EDIT).apply {
             setDataAndType(item.uri, item.mimeType)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(FLAG_GRANT_READ_URI_PERMISSION)
         }
         if (item.mimeType?.startsWith("video") == true) {
             try {
@@ -174,10 +177,10 @@ class ImageFragment : Fragment() {
     }
 
     private fun onShareButtonClicked(item: PagerItem.UriItem) = doOrUnlockFirst {
-        val intent = Intent(Intent.ACTION_SEND).apply {
+        val intent = Intent(ACTION_SEND).apply {
             type = item.mimeType
-            putExtra(Intent.EXTRA_STREAM, item.uri)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            putExtra(EXTRA_STREAM, item.uri)
+            addFlags(FLAG_GRANT_READ_URI_PERMISSION)
         }
         startActivityOrToast(Intent.createChooser(intent, null))
     }
