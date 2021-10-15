@@ -10,8 +10,8 @@ android {
         applicationId "com.google.android.apps.photos"
         minSdk 30
         targetSdk 31
-        versionCode 1000000002
-        versionName "0.2"
+        versionCode 1000000003
+        versionName "0.3"
     }
 
     buildTypes {
