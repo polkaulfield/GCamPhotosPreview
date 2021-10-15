@@ -139,7 +139,7 @@ class ImageFragment : Fragment() {
                     setDataAndType(item.uri, item.mimeType)
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 }
-                startActivityOrToast(Intent.createChooser(intent, null))
+                startActivityOrToast(intent)
             }
         }
         val contentResolver = requireContext().contentResolver
